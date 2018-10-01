@@ -1,0 +1,5 @@
+{
+  "rootDir": "/c/Users/oleg/wsl/work_projects/docker/projects/portal",
+  "scanDirs": ["App"],
+  "countWorkers": 10
+}
