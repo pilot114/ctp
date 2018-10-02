@@ -45,9 +45,11 @@ func findInFile(path string, search string) []FindInfo {
 	scanner := bufio.NewScanner(f)
 	line := 1
 	finded := []FindInfo{}
+
+	fmt.Println(path)
 	for scanner.Scan() {
 		// TODO WTF
-		line = line + 1
+		fmt.Println(line)
 
 		if strings.Contains(scanner.Text(), search) {
 			fmt.Println(scanner.Text(), path, line)
@@ -58,6 +60,7 @@ func findInFile(path string, search string) []FindInfo {
 				LineNumber: line,
 			})
 		}
+		line++
 	}
 
 	if err := scanner.Err(); err != nil {
