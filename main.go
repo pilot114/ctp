@@ -5,15 +5,20 @@ import (
 	"os"
 	"encoding/json"
 	"io/ioutil"
+	"bufio"
 	"strings"
 	"path/filepath"
-	"bufio"
 )
 
 type Config struct {
 	RootDir string
-	ScanDirs []string
+	ScanDirs []ScanDir
 	CountWorkers int
+}
+
+type ScanDir struct {
+	Name string
+	Namespace string
 }
 
 type FindInfo struct {
@@ -21,6 +26,7 @@ type FindInfo struct {
 	Line string
 	LineNumber int
 }
+
 
 func loadConfig() Config {
 	configContent, e := ioutil.ReadFile("./config.json")
@@ -46,14 +52,8 @@ func findInFile(path string, search string) []FindInfo {
 	line := 1
 	finded := []FindInfo{}
 
-	fmt.Println(path)
 	for scanner.Scan() {
-		// TODO WTF
-		fmt.Println(line)
-
 		if strings.Contains(scanner.Text(), search) {
-			fmt.Println(scanner.Text(), path, line)
-
 			finded = append(finded, FindInfo{
 				FileName: path,
 				Line: scanner.Text(),
@@ -69,25 +69,35 @@ func findInFile(path string, search string) []FindInfo {
 	return finded
 }
 
-//"App" , "www", "cron", "html", "lib"
+// TODO: читать один раз и затем искать в памяти
+func findInDir(path string, search string) []FindInfo {
+	finded := []FindInfo{}
+	findedInFile := []FindInfo{}
+	filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+		if strings.HasSuffix(path, ".php") {
+			findedInFile = findInFile(path, search)
+			finded = append(finded, findedInFile...)
+		}
+		return nil
+	})
+	return finded
+}
+
 func main() {
-	var conf Config = loadConfig()
+	var conf = loadConfig()
+	var phpShtormReference = "\\App\\Model\\PO\\PayItem::removeByOrderId"
+	//\company_payorder::items_delete
 
-	for _, item := range conf.ScanDirs {
-		var path = strings.Join([]string{conf.RootDir, item}, "/")
+	var parts = strings.Split(phpShtormReference, "::")
+	var namespace, method = parts[0], parts[1]
+	fmt.Println(namespace)
+
+	for _, dir := range conf.ScanDirs {
+		var path = strings.Join([]string{conf.RootDir, dir.Name}, "/")
 		fmt.Println("Dir:", path)
+		finded := findInDir(path, strings.Join([]string{"->", method, "("}, ""))
 
-		finded := []FindInfo{}
-		findedInFile := []FindInfo{}
-
-		// TODO: читать один раз и затем искать в памяти
-		filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-			if strings.HasSuffix(path, ".php") {
-				findedInFile = findInFile(path, "_formatData")
-				finded = append(finded, findedInFile...)
-			}
-			return nil
-		})
 		fmt.Println("Count finded:", len(finded))
+		//fmt.Println("Finded:", finded)
 	}
 }
