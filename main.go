@@ -8,6 +8,8 @@ import (
 	"bufio"
 	"strings"
 	"path/filepath"
+	"github.com/z7zmey/php-parser/php7"
+	"bytes"
 )
 
 type Config struct {
@@ -84,20 +86,51 @@ func findInDir(path string, search string) []FindInfo {
 }
 
 func main() {
-	var conf = loadConfig()
-	var phpShtormReference = "\\App\\Model\\PO\\PayItem::removeByOrderId"
+	conf := loadConfig()
+	phpShtormReference := "\\App\\Model\\PO\\PayItem::removeByOrderIdXXX"
 	//\company_payorder::items_delete
 
-	var parts = strings.Split(phpShtormReference, "::")
-	var namespace, method = parts[0], parts[1]
+	parts := strings.Split(phpShtormReference, "::")
+	namespace, method := parts[0], parts[1]
 	fmt.Println(namespace)
+
+	finded := []FindInfo{}
 
 	for _, dir := range conf.ScanDirs {
 		var path = strings.Join([]string{conf.RootDir, dir.Name}, "/")
 		fmt.Println("Dir:", path)
-		finded := findInDir(path, strings.Join([]string{"->", method, "("}, ""))
+		finded = findInDir(path, strings.Join([]string{"->", method, "("}, ""))
 
 		fmt.Println("Count finded:", len(finded))
-		//fmt.Println("Finded:", finded)
+	}
+
+	for _, findInfo := range finded {
+		fmt.Println(findInfo.FileName)
+		fmt.Println(findInfo.LineNumber)
+		fmt.Println(findInfo.Line)
+
+		file, err := ioutil.ReadFile(findInfo.FileName)
+		if err != nil {
+			fmt.Print(err)
+		}
+
+		// парсинг php файла
+		src := bytes.NewBufferString(string(file))
+		parser := php7.NewParser(src, findInfo.FileName)
+		parser.Parse()
+
+		for _, e := range parser.GetErrors() {
+			fmt.Println(e)
+		}
+
+		visitor := Walker{
+			Writer:    os.Stdout,
+			Positions: parser.GetPositions(),
+		}
+
+		rootNode := parser.GetRootNode()
+		rootNode.Walk(visitor)
+
+		os.Exit(0)
 	}
 }
