@@ -1,7 +1,7 @@
 {
   "rootDir": "/c/Users/oleg/wsl/work_projects/docker/projects/portal_new",
   "scanDirs": [
-    {"name":"lib", "namespace": null}
+    {"name":"cron", "namespace": null}
   ],
   "countWorkers": 10
 }

@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"github.com/z7zmey/php-parser/php7"
 	"bytes"
+	"pilot114/ctp/walkers"
+	"github.com/z7zmey/php-parser/printer"
+	"pilot114/ctp/structure"
 )
 
 type Config struct {
@@ -21,12 +24,6 @@ type Config struct {
 type ScanDir struct {
 	Name string
 	Namespace string
-}
-
-type FindInfo struct {
-	FileName string
-	Line string
-	LineNumber int
 }
 
 
@@ -43,20 +40,20 @@ func loadConfig() Config {
 	return conf
 }
 
-func findInFile(path string, search string) []FindInfo {
+func findInFile(path string, search string) []walkers.FindInfo {
 	f, err := os.Open(path)
 	if err != nil {
-		return []FindInfo{} // TODO
+		return []walkers.FindInfo{} // TODO error handle
 	}
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
 	line := 1
-	finded := []FindInfo{}
+	finded := []walkers.FindInfo{}
 
 	for scanner.Scan() {
 		if strings.Contains(scanner.Text(), search) {
-			finded = append(finded, FindInfo{
+			finded = append(finded, walkers.FindInfo{
 				FileName: path,
 				Line: scanner.Text(),
 				LineNumber: line,
@@ -66,15 +63,15 @@ func findInFile(path string, search string) []FindInfo {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return []FindInfo{} // TODO
+		return []walkers.FindInfo{} // TODO error handle
 	}
 	return finded
 }
 
 // TODO: читать один раз и затем искать в памяти
-func findInDir(path string, search string) []FindInfo {
-	finded := []FindInfo{}
-	findedInFile := []FindInfo{}
+func findInDir(path string, search string) []walkers.FindInfo {
+	finded := []walkers.FindInfo{}
+	findedInFile := []walkers.FindInfo{}
 	filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
 		if strings.HasSuffix(path, ".php") {
 			findedInFile = findInFile(path, search)
@@ -85,16 +82,66 @@ func findInDir(path string, search string) []FindInfo {
 	return finded
 }
 
+// инициализируем граф
+var graph structure.FindInfoGraph
+
+// итерация заполнения графа
+func addFindedToGraph(method string, parent structure.Node, findInfoMap map[string][]walkers.FindInfo) {
+
+	for fileName, findInfos := range findInfoMap {
+		fmt.Println(fileName)
+
+		// парсинг php файла в AST
+		file, err := ioutil.ReadFile(fileName)
+		if err != nil {
+			fmt.Print(err)
+		}
+		src := bytes.NewBufferString(string(file))
+		parser := php7.NewParser(src, fileName)
+		parser.Parse()
+		for _, e := range parser.GetErrors() {
+			fmt.Println(e)
+			os.Exit(0)
+		}
+
+		// проходим по AST, чтобы получить нужные ноды
+		for _, findInfo := range findInfos {
+
+			// добавляем найденное в граф
+			node := structure.Node{findInfo}
+			graph.AddNode(&node)
+			graph.AddEdge(&node, &parent)
+
+			nodeFinder := walkers.NodeFinder{
+				Writer:        os.Stdout,
+				Positions:     parser.GetPositions(),
+				FindSignature: method,
+				FindInfo:      &findInfo,
+			}
+
+			rootNode := parser.GetRootNode()
+			rootNode.Walk(nodeFinder)
+
+			// вывод в буфер
+			buf := new(bytes.Buffer)
+			p := printer.NewPrinter(buf, "")
+			p.Print(findInfo.Node)
+
+			// TODO: надо разрезолвить неймспейс найденого метода, чтобы использовать его при дальнейших чеках
+			fmt.Println(buf.String())
+		}
+	}
+}
+
 func main() {
 	conf := loadConfig()
 	phpShtormReference := "\\App\\Model\\PO\\PayItem::removeByOrderIdXXX"
-	//\company_payorder::items_delete
 
 	parts := strings.Split(phpShtormReference, "::")
 	namespace, method := parts[0], parts[1]
 	fmt.Println(namespace)
 
-	finded := []FindInfo{}
+	finded := []walkers.FindInfo{}
 
 	for _, dir := range conf.ScanDirs {
 		var path = strings.Join([]string{conf.RootDir, dir.Name}, "/")
@@ -104,33 +151,23 @@ func main() {
 		fmt.Println("Count finded:", len(finded))
 	}
 
+	// делаем мапу, группируя найденное по именам файлов
+	FindInfoMap := make(map[string][]walkers.FindInfo)
 	for _, findInfo := range finded {
-		fmt.Println(findInfo.FileName)
-		fmt.Println(findInfo.LineNumber)
-		fmt.Println(findInfo.Line)
-
-		file, err := ioutil.ReadFile(findInfo.FileName)
-		if err != nil {
-			fmt.Print(err)
-		}
-
-		// парсинг php файла
-		src := bytes.NewBufferString(string(file))
-		parser := php7.NewParser(src, findInfo.FileName)
-		parser.Parse()
-
-		for _, e := range parser.GetErrors() {
-			fmt.Println(e)
-		}
-
-		visitor := Walker{
-			Writer:    os.Stdout,
-			Positions: parser.GetPositions(),
-		}
-
-		rootNode := parser.GetRootNode()
-		rootNode.Walk(visitor)
-
-		os.Exit(0)
+		FindInfoMap[findInfo.FileName] = append(FindInfoMap[findInfo.FileName], findInfo)
 	}
+
+	rootNode := structure.Node{
+		Value: walkers.FindInfo{
+			FileName: "ROOT",
+			Line: "ROOT",
+			LineNumber: 0,
+			Node: nil,
+		},
+	}
+	graph.AddNode(&rootNode)
+
+	addFindedToGraph(method, rootNode, FindInfoMap)
+
+	graph.String()
 }
