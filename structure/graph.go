@@ -4,6 +4,8 @@ import (
 	"sync"
 	"pilot114/ctp/walkers"
 	"fmt"
+	"bytes"
+	"github.com/z7zmey/php-parser/printer"
 )
 
 // граф
@@ -20,7 +22,17 @@ type Node struct {
 
 // печать
 func (n *Node) String() string {
-	return fmt.Sprintf("%v", n.Value.Line)
+	// вывод в буфер
+	buf := new(bytes.Buffer)
+	p := printer.NewPrinter(buf, "")
+	p.Print(n.Value.Node)
+
+	output := "ROOT"
+	if len(buf.String()) > 0 {
+		output = buf.String()
+	}
+
+	return fmt.Sprintf("%v", output)
 }
 func (g *FindInfoGraph) String() {
 	g.lock.RLock()

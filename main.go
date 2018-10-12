@@ -11,7 +11,6 @@ import (
 	"github.com/z7zmey/php-parser/php7"
 	"bytes"
 	"pilot114/ctp/walkers"
-	"github.com/z7zmey/php-parser/printer"
 	"pilot114/ctp/structure"
 )
 
@@ -26,6 +25,10 @@ type ScanDir struct {
 	Namespace string
 }
 
+type Signature struct {
+	Namespace string
+	MethodName string
+}
 
 func loadConfig() Config {
 	configContent, e := ioutil.ReadFile("./config.json")
@@ -40,7 +43,10 @@ func loadConfig() Config {
 	return conf
 }
 
-func findInFile(path string, search string) []walkers.FindInfo {
+func findInFile(path string, signature Signature) []walkers.FindInfo {
+
+	find := strings.Join([]string{"->", signature.MethodName, "("}, "")
+
 	f, err := os.Open(path)
 	if err != nil {
 		return []walkers.FindInfo{} // TODO error handle
@@ -52,7 +58,8 @@ func findInFile(path string, search string) []walkers.FindInfo {
 	finded := []walkers.FindInfo{}
 
 	for scanner.Scan() {
-		if strings.Contains(scanner.Text(), search) {
+		// TODO: надо разрезолвить неймспейс найденого метода, чтобы использовать его при дальнейших чеках
+		if strings.Contains(scanner.Text(), find) {
 			finded = append(finded, walkers.FindInfo{
 				FileName: path,
 				Line: scanner.Text(),
@@ -69,16 +76,18 @@ func findInFile(path string, search string) []walkers.FindInfo {
 }
 
 // TODO: читать один раз и затем искать в памяти
-func findInDir(path string, search string) []walkers.FindInfo {
+func findInDir(path string, signature Signature) []walkers.FindInfo {
+
 	finded := []walkers.FindInfo{}
 	findedInFile := []walkers.FindInfo{}
 	filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
 		if strings.HasSuffix(path, ".php") {
-			findedInFile = findInFile(path, search)
+			findedInFile = findInFile(path, signature)
 			finded = append(finded, findedInFile...)
 		}
 		return nil
 	})
+
 	return finded
 }
 
@@ -86,7 +95,7 @@ func findInDir(path string, search string) []walkers.FindInfo {
 var graph structure.FindInfoGraph
 
 // итерация заполнения графа
-func addFindedToGraph(method string, parent structure.Node, findInfoMap map[string][]walkers.FindInfo) {
+func addFindedToGraph(signature Signature, parent structure.Node, findInfoMap map[string][]walkers.FindInfo) {
 
 	for fileName, findInfos := range findInfoMap {
 		fmt.Println(fileName)
@@ -107,30 +116,33 @@ func addFindedToGraph(method string, parent structure.Node, findInfoMap map[stri
 		// проходим по AST, чтобы получить нужные ноды
 		for _, findInfo := range findInfos {
 
-			// добавляем найденное в граф
-			node := structure.Node{findInfo}
-			graph.AddNode(&node)
-			graph.AddEdge(&node, &parent)
-
 			nodeFinder := walkers.NodeFinder{
 				Writer:        os.Stdout,
 				Positions:     parser.GetPositions(),
-				FindSignature: method,
+				FindSignature: signature.MethodName,
 				FindInfo:      &findInfo,
 			}
 
 			rootNode := parser.GetRootNode()
 			rootNode.Walk(nodeFinder)
 
-			// вывод в буфер
-			buf := new(bytes.Buffer)
-			p := printer.NewPrinter(buf, "")
-			p.Print(findInfo.Node)
-
-			// TODO: надо разрезолвить неймспейс найденого метода, чтобы использовать его при дальнейших чеках
-			fmt.Println(buf.String())
+			// добавляем найденное в граф
+			node := structure.Node{findInfo}
+			graph.AddNode(&node)
+			graph.AddEdge(&node, &parent)
 		}
 	}
+}
+
+func find(root string, dirs []ScanDir, signature Signature) []walkers.FindInfo {
+
+	finded := []walkers.FindInfo{}
+	for _, dir := range dirs {
+		var path = strings.Join([]string{root, dir.Name}, "/")
+		fmt.Println("Dir:", path)
+		finded = findInDir(path, signature)
+	}
+	return finded
 }
 
 func main() {
@@ -138,18 +150,13 @@ func main() {
 	phpShtormReference := "\\App\\Model\\PO\\PayItem::removeByOrderIdXXX"
 
 	parts := strings.Split(phpShtormReference, "::")
-	namespace, method := parts[0], parts[1]
-	fmt.Println(namespace)
-
-	finded := []walkers.FindInfo{}
-
-	for _, dir := range conf.ScanDirs {
-		var path = strings.Join([]string{conf.RootDir, dir.Name}, "/")
-		fmt.Println("Dir:", path)
-		finded = findInDir(path, strings.Join([]string{"->", method, "("}, ""))
-
-		fmt.Println("Count finded:", len(finded))
+	signature := Signature{
+		Namespace: parts[0],
+		MethodName: parts[1],
 	}
+
+	finded := find(conf.RootDir, conf.ScanDirs, signature)
+	fmt.Println("Count finded:", len(finded))
 
 	// делаем мапу, группируя найденное по именам файлов
 	FindInfoMap := make(map[string][]walkers.FindInfo)
@@ -167,7 +174,7 @@ func main() {
 	}
 	graph.AddNode(&rootNode)
 
-	addFindedToGraph(method, rootNode, FindInfoMap)
+	addFindedToGraph(signature, rootNode, FindInfoMap)
 
 	graph.String()
 }
