@@ -2,10 +2,10 @@ package structure
 
 import (
 	"sync"
-	"pilot114/ctp/walkers"
 	"fmt"
 	"bytes"
 	"github.com/z7zmey/php-parser/printer"
+	"github.com/z7zmey/php-parser/node"
 )
 
 // граф
@@ -17,7 +17,7 @@ type FindInfoGraph struct {
 
 // узел графа
 type Node struct {
-	Value walkers.FindInfo
+	Value node.Node
 }
 
 // печать
@@ -25,7 +25,7 @@ func (n *Node) String() string {
 	// вывод в буфер
 	buf := new(bytes.Buffer)
 	p := printer.NewPrinter(buf, "")
-	p.Print(n.Value.Node)
+	p.Print(n.Value)
 
 	output := "ROOT"
 	if len(buf.String()) > 0 {

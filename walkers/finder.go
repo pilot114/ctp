@@ -16,11 +16,10 @@ type Signature struct {
 }
 
 type FindInfo struct {
-	FileName string // имя файла
-	Line string     // строка, в которой нашли совпадение
-	LineNumber int  // номер строки
 	Node node.Node  // нода совпадения (после парсинга)
 	Signature Signature
+	Line string     // строка, в которой нашли совпадение
+	LineNumber int  // номер строки
 }
 
 type NodeFinder struct {

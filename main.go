@@ -5,13 +5,13 @@ import (
 	"os"
 	"encoding/json"
 	"io/ioutil"
-	"bufio"
 	"strings"
 	"path/filepath"
 	"github.com/z7zmey/php-parser/php7"
 	"bytes"
 	"pilot114/ctp/walkers"
 	"pilot114/ctp/structure"
+	"bufio"
 )
 
 type Config struct {
@@ -25,7 +25,9 @@ type ScanDir struct {
 	Namespace string
 }
 
-
+// инициализируем граф и корневую ноду
+var graph structure.FindInfoGraph
+var rootNode structure.Node
 
 func loadConfig() Config {
 	configContent, e := ioutil.ReadFile("./config.json")
@@ -40,76 +42,52 @@ func loadConfig() Config {
 	return conf
 }
 
-func findInFile(path string, signature walkers.Signature) []walkers.FindInfo {
-
-	find := strings.Join([]string{"->", signature.MethodName, "("}, "")
-
-	f, err := os.Open(path)
-	if err != nil {
-		return []walkers.FindInfo{} // TODO error handle
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	line := 1
-	finded := []walkers.FindInfo{}
-
-	for scanner.Scan() {
-		if strings.Contains(scanner.Text(), find) {
-			finded = append(finded, walkers.FindInfo{
-				FileName: path,
-				Line: scanner.Text(),
-				LineNumber: line,
-				Signature: signature,
-			})
-		}
-		line++
-	}
-
-	if err := scanner.Err(); err != nil {
-		return []walkers.FindInfo{} // TODO error handle
-	}
-	return finded
-}
-
-// TODO: читать один раз и затем искать в памяти
-func findInDir(path string, signature walkers.Signature) []walkers.FindInfo {
-
-	finded := []walkers.FindInfo{}
-	findedInFile := []walkers.FindInfo{}
-	filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-		if strings.HasSuffix(path, ".php") {
-			findedInFile = findInFile(path, signature)
-			finded = append(finded, findedInFile...)
-		}
-		return nil
-	})
-
-	return finded
-}
-
-// инициализируем граф
-var graph structure.FindInfoGraph
-
-// итерация заполнения графа
-func addFindedToGraph(signature walkers.Signature, parent structure.Node, fileName string, findInfos []walkers.FindInfo) {
+func findInFile(parent structure.Node, path string, signature walkers.Signature) {
 
 	// парсинг php файла в AST
-	file, err := ioutil.ReadFile(fileName)
+	file, err := ioutil.ReadFile(path)
 	if err != nil {
 		fmt.Print(err)
 	}
 	src := bytes.NewBufferString(string(file))
-	parser := php7.NewParser(src, fileName)
+	parser := php7.NewParser(src, path)
 	parser.Parse()
 	for _, e := range parser.GetErrors() {
 		fmt.Println(e)
 		os.Exit(0)
 	}
 
+	// сначала проходим по файлу простым поиском
+	find := strings.Join([]string{"->", signature.MethodName, "("}, "")
+
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	line := 1
+	findInfos := []walkers.FindInfo{}
+
+	for scanner.Scan() {
+		if strings.Contains(scanner.Text(), find) {
+			findInfos = append(findInfos, walkers.FindInfo{
+				Line: scanner.Text(),
+				LineNumber: line,
+				Signature: signature,
+				Node: nil,
+			})
+		}
+		line++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return
+	}
+
 	// проходим по AST, чтобы получить нужные ноды
 	for _, findInfo := range findInfos {
-
 		nodeFinder := walkers.NodeFinder{
 			Writer:        os.Stdout,
 			Positions:     parser.GetPositions(),
@@ -117,25 +95,29 @@ func addFindedToGraph(signature walkers.Signature, parent structure.Node, fileNa
 			FindInfo:      &findInfo,
 		}
 
-		rootNode := parser.GetRootNode()
-		rootNode.Walk(nodeFinder)
+		parser.GetRootNode().Walk(nodeFinder)
 
 		// добавляем найденное в граф
-		node := structure.Node{findInfo}
-		graph.AddNode(&node)
-		graph.AddEdge(&node, &parent)
+		n := structure.Node{Value: findInfo.Node}
+		graph.AddNode(&n)
+		graph.AddEdge(&n, &parent)
 	}
 }
 
-func find(root string, dirs []ScanDir, signature walkers.Signature) []walkers.FindInfo {
+// TODO: читать один раз и затем искать в памяти
+func find(parent structure.Node, root string, dirs []ScanDir, signature walkers.Signature) {
 
-	finded := []walkers.FindInfo{}
 	for _, dir := range dirs {
 		var path = strings.Join([]string{root, dir.Name}, "/")
 		fmt.Println("Dir:", path)
-		finded = findInDir(path, signature)
+
+		filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+			if strings.HasSuffix(path, ".php") {
+				findInFile(parent, path, signature)
+			}
+			return nil
+		})
 	}
-	return finded
 }
 
 func main() {
@@ -148,28 +130,13 @@ func main() {
 		MethodName: parts[1],
 	}
 
-	rootNode := structure.Node{
-		Value: walkers.FindInfo{
-			FileName: "ROOT",
-			Line: "ROOT",
-			LineNumber: 0,
-			Node: nil,
-		},
+	rootNode = structure.Node{
+		Value: nil,
 	}
 	graph.AddNode(&rootNode)
 
-	finded := find(conf.RootDir, conf.ScanDirs, signature)
-	fmt.Println("Count finded:", len(finded))
-
-	// делаем мапу, группируя найденное по именам файлов
-	FindInfoMap := make(map[string][]walkers.FindInfo)
-	for _, findInfo := range finded {
-		FindInfoMap[findInfo.FileName] = append(FindInfoMap[findInfo.FileName], findInfo)
-	}
-
-	for fileName, findInfos := range FindInfoMap {
-		addFindedToGraph(signature, rootNode, fileName, findInfos)
-	}
+	find(rootNode, conf.RootDir, conf.ScanDirs, signature)
+	//fmt.Println("Count finded:", len(finded))
 
 	graph.String()
 }
