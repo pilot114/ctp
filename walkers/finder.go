@@ -10,11 +10,17 @@ import (
 	"strings"
 )
 
+type Signature struct {
+	Namespace string
+	MethodName string
+}
+
 type FindInfo struct {
 	FileName string // имя файла
 	Line string     // строка, в которой нашли совпадение
 	LineNumber int  // номер строки
 	Node node.Node  // нода совпадения (после парсинга)
+	Signature Signature
 }
 
 type NodeFinder struct {
